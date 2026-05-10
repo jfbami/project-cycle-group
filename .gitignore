@@ -1,3 +1,5 @@
 data/ 
 __pycache__/ 
 .env 
+features.pdf 
+make_features_pdf.py 
