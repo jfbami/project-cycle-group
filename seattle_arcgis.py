@@ -129,7 +129,7 @@ def fetch_aadt(years: range) -> gpd.GeoDataFrame:
 
 
 if __name__ == "__main__":
-    out = Path(__file__).parent.parent / "data" / "raw"
+    out = Path(__file__).parent / "data" / "raw"
     out.mkdir(parents=True, exist_ok=True)
 
     for key, (service, layer) in SERVICES.items():
