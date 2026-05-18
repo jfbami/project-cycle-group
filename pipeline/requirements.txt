@@ -4,3 +4,4 @@ shapely
 scipy
 pyarrow
 requests
+statsmodels
