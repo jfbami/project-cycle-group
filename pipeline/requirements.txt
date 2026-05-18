@@ -1,0 +1,6 @@
+geopandas
+pandas
+shapely
+scipy
+pyarrow
+requests
