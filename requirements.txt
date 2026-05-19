@@ -1,3 +1,10 @@
 geopandas
 pandas
+shapely
+scipy
+pyarrow
 requests
+statsmodels
+streamlit
+pydeck
+anthropic
