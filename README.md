@@ -9,7 +9,23 @@ A Negative Binomial regression scores all **651 intersections** in Capitol Hill 
 - Fits `total_crashes ~ is_signalized + num_legs + max_speed_limit + bike_facility + C(arterial_class)` (statsmodels NB2, log link, `offset = log(years_observed)`).
 - Excludes AADT (traffic volume) — the available coverage was too sparse over Capitol Hill. The infrastructure coefficients absorb some of the missing volume signal.
 - Applies AASHTO HSM Part C Empirical-Bayes shrinkage (`w = 1 / (1 + α·predicted); eb = w·predicted + (1−w)·observed`) before ranking, so extreme model predictions are pulled toward observed counts.
-- Reports `risk_score` as a **0–100 percentile rank**, not a calibrated crash count. Quintile cut-points define `risk_tier` (`very_high`, `high`, `moderate`, `low`, `very_low`).
+- Reports `risk_score` as a **0–100 percentile rank**, not a calibrated crash count. `risk_tier` cut-points: `very_high` ≥ 90, `high` 70–89, `moderate` 40–69, `low` 20–39, `very_low` < 20 (very_high is the top ~10% so it reads as severe).
+
+## Vision Zero framing
+
+The pipeline also emits five severity counts per intersection from SDOT's `MAXSEVERITYCODE`:
+- `injury_total` — any injury collision (code ≥ 2)
+- `ksi_total` — Killed or Seriously Injured (code ≥ 3, the Vision Zero target metric)
+- `fatal_total` — fatal only (code = 4)
+- `ped_total` / `bike_total` — count of crashes with `PEDCOUNT > 0` / `PEDCYLCOUNT > 0`
+
+The Streamlit app surfaces these in a scorecard at the top of the page (filter-aware) and per intersection in the detail panel. Capitol Hill 2018–23 has 4 injury crashes and 0 KSI at the 651 intersections — that's the actual data, and "0 KSI" is itself a meaningful Vision Zero baseline (whether it represents true success or partial under-reporting). **Caveat:** SDOT's per-crash `PEDCOUNT` / `PEDCYLCOUNT` fields appear sparsely populated for records post-2018; the displayed ped/bike count is conservative.
+
+## Counterfactual / "what-if" intervention modeling
+
+The detail panel's **What if...** expander lets you set hypothetical feature values (toggle signal, add bike facility, downgrade arterial, change speed limit, change # of legs) and see the model's predicted Δ in expected crashes/year. Useful for evaluating intervention scenarios.
+
+**Important caveat:** the model excludes AADT, so the `arterial_class` and `max_speed_limit` coefficients absorb the missing traffic-volume signal. Counterfactual Δ should be treated as **directional, not calibrated**. In particular, lowering `max_speed_limit` can show a *positive* Δ (worse) — that's because the model is reading low posted speeds as a proxy for low-traffic residential streets without enough other signal to separate the two.
 
 ## Why we dropped the VLM
 
@@ -40,10 +56,12 @@ cp .streamlit/secrets.toml.example .streamlit/secrets.toml
 streamlit run app/streamlit_app.py
 ```
 
-- Map: all 651 intersections, colored by `risk_tier`, sized by `risk_score`.
-- Sidebar: filter by tier, pick an intersection by ID.
-- Side panel: score badge, expected-vs-actual crash counts, feature table.
-- **Explain risk with Claude** button: streams a 2–3 paragraph explanation grounded in the model's actual feature values, the EB adjustment, and the intersection's percentile rank. Uses `claude-sonnet-4-6` with prompt caching on the system block.
+- **Vision Zero scorecard** at the top: total crashes, injuries, KSI, fatalities, ped/bike-involved — recomputed over the current tier filter.
+- **Map**: all 651 intersections, colored by `risk_tier`, sized by `risk_score`. Hover for tooltip, click to populate the side panel.
+- **Sidebar**: filter by tier, pick an intersection by ID.
+- **Side panel**: score badge, expected-vs-actual crash counts, severity breakdown, feature table.
+- **Explain risk with Claude** button: streams a 2–3 paragraph explanation grounded in the model's actual feature values, the EB adjustment, the intersection's percentile rank, and severity counts. Uses `claude-haiku-4-5` (≈ 0.25¢ per click).
+- **What if... expander**: counterfactual intervention modeling — set hypothetical features and see the predicted Δ in expected crashes/year.
 
 ## File layout
 
@@ -56,11 +74,12 @@ pipeline/
   fit_risk_model.py           NB2 SPF fit + predictions
   score_risk.py               EB shrinkage + percentile rank + tier
 app/
-  streamlit_app.py            Map + filters + side panel
+  streamlit_app.py            Map + filters + side panel + Vision Zero scorecard
   data_loader.py              Joins scores ⨝ predictions ⨝ features ⨝ intersections
+  counterfactual.py           Load pkl + predict at hypothetical feature configurations
   components/
     map.py                    pydeck ScatterplotLayer
-    detail.py                 Side panel + Claude streaming
+    detail.py                 Side panel + Claude streaming + "What if..." expander
   llm/
     prompts.py                System prompt + per-intersection user prompt builder
     explainer.py              Anthropic client + CLI entry point
@@ -86,9 +105,11 @@ python -X utf8 -m app.data_loader
 
 ## Known limitations
 
-- **No AADT.** The infrastructure coefficients are inflated as a result. Adding a usable volume layer is the natural next iteration; the model fits cleanly with `log(aadt)` as an offset or predictor.
+- **No AADT.** The infrastructure coefficients are inflated as a result. Adding a usable volume layer is the natural next iteration; the model fits cleanly with `log(aadt)` as an offset or predictor. The counterfactual UI surfaces this caveat next to its prediction.
 - **Capitol Hill scope only.** 651 intersections in a single neighborhood. Expanding to the rest of Seattle is a refit and re-snap, not an app change.
 - **6-year observation window (2018–2023).** Re-fit when more recent collision data is available from SDOT.
+- **SDOT ped/bike severity fields are sparse post-2018.** `PEDCOUNT` / `PEDCYLCOUNT` are essentially zero for records in the 2018+ window in this dump. The Vision Zero scorecard shows that honestly; treat the ped/bike count as a lower bound.
+- **Counterfactual is directional, not calibrated.** Without AADT, `arterial_class` and `max_speed_limit` absorb the missing volume signal, so Δ values are illustrative — particularly weird at the boundaries (lowering speed can show *positive* Δ, an artifact of the confounding, not a real effect).
 - **Single-turn explainer.** Each click is a fresh request; no chat history. Sufficient for the demo, easy to extend.
 
 ## Archive

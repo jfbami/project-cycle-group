@@ -154,7 +154,11 @@ def compute_scores(predictions: pd.DataFrame, alpha: float) -> pd.DataFrame:
       risk_tier                            - quintile label.
       expected_crashes_per_year            - RAW pre-EB, secondary/drill-in only.
     """
-    df = predictions[["intersection_id", "expected_crashes_per_year", "model_version"]].copy()
+    # Carry severity sub-counts through for the Vision Zero scorecard.
+    severity_cols = [c for c in ("injury_total", "ksi_total", "fatal_total",
+                                  "ped_total", "bike_total") if c in predictions.columns]
+    df = predictions[["intersection_id", "expected_crashes_per_year", "model_version"]
+                     + severity_cols].copy()
 
     eb = compute_eb_estimate(predictions, alpha)
     df = df.merge(eb, on="intersection_id", how="left")
@@ -173,7 +177,7 @@ def compute_scores(predictions: pd.DataFrame, alpha: float) -> pd.DataFrame:
         "eb_estimate_per_year",
         "expected_crashes_per_year",   # secondary - raw pre-EB, uncalibrated
         "model_version",
-    ]]
+    ] + severity_cols]
 
 
 def write_output(scores: pd.DataFrame) -> None:

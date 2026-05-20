@@ -14,7 +14,7 @@ import anthropic
 from app.data_loader import get_intersection
 from app.llm.prompts import SYSTEM_PROMPT, build_user_message
 
-MODEL = "claude-sonnet-4-6"
+MODEL = "claude-haiku-4-5"
 MAX_TOKENS = 512
 
 
@@ -33,8 +33,6 @@ def explain_intersection(row: dict, api_key: str | None = None) -> Iterator[str]
     with client.messages.stream(
         model=MODEL,
         max_tokens=MAX_TOKENS,
-        thinking={"type": "disabled"},
-        output_config={"effort": "low"},
         system=[
             {
                 "type": "text",

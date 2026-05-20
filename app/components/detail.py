@@ -62,6 +62,17 @@ def render(row: dict | None):
     b.metric("Actual",          int(row.get("actual_total") or 0))
     c.metric("EB / year",       _fmt(row.get("eb_estimate_per_year"), ".3f"))
 
+    # Vision Zero severity breakdown
+    injury = int(row.get("injury_total") or 0)
+    ksi    = int(row.get("ksi_total") or 0)
+    fatal  = int(row.get("fatal_total") or 0)
+    ped    = int(row.get("ped_total") or 0)
+    bike   = int(row.get("bike_total") or 0)
+    st.markdown(
+        f"**Severity (2018–23):** {injury} injury · {ksi} KSI · "
+        f"{fatal} fatal · {ped} ped · {bike} bike"
+    )
+
     st.markdown("**Features**")
     arterial_class = int(row.get("arterial_class") or 0)
     arterial_label = _ARTERIAL_LABEL.get(arterial_class, f"class {arterial_class}")
@@ -85,6 +96,89 @@ def render(row: dict | None):
     st.divider()
     if st.button("Explain risk with Claude", use_container_width=True, type="primary"):
         _stream_explanation(row)
+
+    _render_counterfactual(row)
+
+
+_ARTERIAL_CHOICE_FMT = {
+    0: "0 — local / non-arterial",
+    1: "1 — principal arterial",
+    2: "2 — minor arterial",
+    3: "3 — collector arterial",
+    4: "4 — NOS arterial",
+    5: "5 — other arterial subclass",
+}
+
+
+def _render_counterfactual(row: dict):
+    """'What if...' expander — predict expected crashes/year under hypothetical features."""
+    iid = row.get("intersection_id", "?")
+    with st.expander("What if... (intervention modeling)", expanded=False):
+        st.caption(
+            "Counterfactual prediction from the fitted Negative Binomial model. "
+            "The model excludes traffic volume (AADT); arterial-class and speed "
+            "effects absorb some volume signal and are inflated — treat Δ as "
+            "directional, not calibrated."
+        )
+
+        new_sig = st.checkbox(
+            "Signalized",
+            value=bool(row.get("is_signalized")),
+            key=f"cf_sig_{iid}",
+        )
+        new_legs = st.number_input(
+            "Number of legs",
+            min_value=3, max_value=8,
+            value=int(row.get("num_legs") or 4),
+            key=f"cf_legs_{iid}",
+        )
+        new_speed = st.slider(
+            "Max speed limit (mph)",
+            min_value=15, max_value=55,
+            value=int(row.get("max_speed_limit") or 25),
+            step=5,
+            key=f"cf_spd_{iid}",
+        )
+        new_bike = st.checkbox(
+            "Bike facility within 15 m",
+            value=bool(row.get("bike_facility")),
+            key=f"cf_bike_{iid}",
+        )
+        cur_art = int(row.get("arterial_class") or 0)
+        new_art = st.selectbox(
+            "Arterial class",
+            options=[0, 1, 2, 3, 4, 5],
+            index=cur_art,
+            format_func=lambda x: _ARTERIAL_CHOICE_FMT.get(x, str(x)),
+            key=f"cf_art_{iid}",
+        )
+
+        overrides = {
+            "is_signalized":   int(new_sig),
+            "num_legs":        int(new_legs),
+            "max_speed_limit": float(new_speed),
+            "bike_facility":   int(new_bike),
+            "arterial_class":  int(new_art),
+        }
+
+        try:
+            from app.counterfactual import compare
+            result = compare(row, overrides)
+        except Exception as e:
+            st.error(f"Counterfactual failed: {e}")
+            return
+
+        delta_label = "—"
+        if result["pct_change"] == result["pct_change"]:  # not NaN
+            delta_label = f"{result['delta']:+.3f}/yr ({result['pct_change']:+.0f}%)"
+        st.metric(
+            "Expected crashes / year (hypothetical)",
+            value=f"{result['hypothetical_per_year']:.3f}",
+            delta=delta_label,
+            delta_color="inverse",  # negative delta = good = green
+            help=f"Current: {result['current_per_year']:.3f} crashes/year. "
+                 "Lower is better, so green = predicted reduction.",
+        )
 
 
 def _stream_explanation(row: dict):

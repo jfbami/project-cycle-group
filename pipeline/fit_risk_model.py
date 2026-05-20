@@ -242,7 +242,10 @@ def validate(result, df: pd.DataFrame) -> pd.DataFrame:
     Asserts all expected_total >= 0 and that the sum is within 15% of the
     actual total before returning.  Stops with a diagnostic if either fails.
     """
-    out = df[["intersection_id", "total_crashes", "years_observed"]].copy()
+    # Carry severity sub-counts through for the Vision Zero scorecard downstream.
+    severity_cols = [c for c in ("injury_total", "ksi_total", "fatal_total",
+                                  "ped_total", "bike_total") if c in df.columns]
+    out = df[["intersection_id", "total_crashes", "years_observed"] + severity_cols].copy()
 
     # predict() applies exp(X @ beta + offset) — response scale, always >= 0
     out["expected_total"] = result.predict(df, offset=df["offset"].values)

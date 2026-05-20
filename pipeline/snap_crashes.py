@@ -207,6 +207,20 @@ def filter_crashes(
 # Snap to intersections
 # ---------------------------------------------------------------------------
 
+# Severity fields carried from the raw collisions layer through the snap.
+#
+# Schema notes — SDOT changed how crash modality is encoded around 2018:
+#   - MAXSEVERITYCODE (1=PDO, 2=Injury, 3=Serious, 4=Fatal): reliable across
+#     the whole date range; the Vision Zero KSI counts are derived from it.
+#   - PEDCOUNT / PEDCYLCOUNT (per-crash counts): populated pre-2018, mostly
+#     null post-2018. Querying these alone undercounts ped/bike crashes 2018+.
+#   - SDOT_COLDESC (free-text): populated across the whole range. Post-2018
+#     ped/bike crashes are encoded only here, with terms "PEDESTRIAN" and
+#     "PEDALCYCLIST" (SDOT's spelling for cyclist). Parsed below as a
+#     fallback so the ped/bike counts are honest for both eras.
+SEVERITY_COLS = ("MAXSEVERITYCODE", "PEDCOUNT", "PEDCYLCOUNT", "SDOT_COLDESC")
+
+
 def snap_to_intersections(
     collisions: gpd.GeoDataFrame,
     intersections: gpd.GeoDataFrame,
@@ -214,7 +228,10 @@ def snap_to_intersections(
     """
     Spatial join each crash to its nearest intersection within SNAP_DISTANCE_M.
 
-    Returns a DataFrame with columns [intersection_id, _year].
+    Carries _year plus the per-crash severity fields (SERIOUSINJURIES, FATALITIES,
+    PEDCOUNT, PEDCYLCOUNT) through so build_target_tables() can aggregate them
+    per intersection for the Vision Zero scorecard.
+
     Crashes with no intersection within 25 m are dropped (counted by caller).
     """
     for label, gdf in (("collisions", collisions), ("intersections", intersections)):
@@ -228,8 +245,10 @@ def snap_to_intersections(
         if gdf.geometry.is_empty.all():
             sys.exit(f"[ERROR] {label} active geometry column is entirely empty.")
 
+    # Keep severity columns that exist on this dataset; missing ones become 0 downstream.
+    keep = ["geometry", "_year"] + [c for c in SEVERITY_COLS if c in collisions.columns]
     snapped = gpd.sjoin_nearest(
-        collisions[["geometry", "_year"]],
+        collisions[keep],
         intersections[["intersection_id", "geometry"]],
         how="left",
         max_distance=SNAP_DISTANCE_M,
@@ -248,9 +267,11 @@ def build_target_tables(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Build the complete intersection × year grid (zeros included) and the
-    per-intersection summary table.
+    per-intersection summary table with severity sub-counts.
 
-    Returns (crashes_by_year, crashes_by_intersection).
+    Returns (crashes_by_year, crashes_by_intersection). The per-intersection
+    table has: intersection_id, total_crashes, years_observed,
+    serious_total, fatal_total, ped_total, bike_total.
     """
     matched = snapped.dropna(subset=["intersection_id"]).copy()
     matched["year"] = matched["_year"].astype(int)
@@ -280,6 +301,41 @@ def build_target_tables(
         .reset_index(name="total_crashes")
     )
     crashes_by_intersection["years_observed"] = years_observed
+
+    # Severity sub-counts. MAXSEVERITYCODE is a string in the raw GeoJSON — coerce.
+    flags = pd.DataFrame({"intersection_id": matched["intersection_id"]})
+    if "MAXSEVERITYCODE" in matched.columns:
+        sev = pd.to_numeric(matched["MAXSEVERITYCODE"], errors="coerce").fillna(0)
+        flags["injury_total"] = (sev >= 2).astype(int)  # injury or worse
+        flags["ksi_total"]    = (sev >= 3).astype(int)  # killed or seriously injured (Vision Zero)
+        flags["fatal_total"]  = (sev == 4).astype(int)
+    else:
+        flags["injury_total"] = 0
+        flags["ksi_total"]    = 0
+        flags["fatal_total"]  = 0
+
+    # Ped / bike: OR-combine the structured count fields (pre-2018) with
+    # keyword-parsed SDOT_COLDESC (still populated post-2018). Without the
+    # fallback, the structured fields alone undercount ped/bike crashes by
+    # ~100% for 2018+ records.
+    desc = (matched.get("SDOT_COLDESC", pd.Series("", index=matched.index))
+            .fillna("").str.upper())
+    ped_count_flag  = (matched["PEDCOUNT"].fillna(0) > 0) \
+        if "PEDCOUNT" in matched.columns else pd.Series(False, index=matched.index)
+    bike_count_flag = (matched["PEDCYLCOUNT"].fillna(0) > 0) \
+        if "PEDCYLCOUNT" in matched.columns else pd.Series(False, index=matched.index)
+    ped_desc_flag  = desc.str.contains("PEDESTRIAN",   regex=False, na=False)
+    bike_desc_flag = desc.str.contains("PEDALCYCLIST", regex=False, na=False)
+    flags["ped_total"]  = (ped_count_flag  | ped_desc_flag).astype(int)
+    flags["bike_total"] = (bike_count_flag | bike_desc_flag).astype(int)
+
+    severity_cols = ["injury_total", "ksi_total", "fatal_total", "ped_total", "bike_total"]
+    severity = flags.groupby("intersection_id")[severity_cols].sum().reset_index()
+    crashes_by_intersection = crashes_by_intersection.merge(
+        severity, on="intersection_id", how="left"
+    )
+    for col in severity_cols:
+        crashes_by_intersection[col] = crashes_by_intersection[col].fillna(0).astype(int)
 
     return crashes_by_year, crashes_by_intersection
 
