@@ -17,3 +17,6 @@ async function get<T>(path: string): Promise<T> {
  *   bike_facility, arterial_class
  */
 export const fetchIntersections = () => get<FeatureCollection>('/api/intersections');
+
+/** GeoJSON FeatureCollection of LineStrings — bike facility network. */
+export const fetchBikeFacilities = () => get<FeatureCollection>('/api/bike-facilities');

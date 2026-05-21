@@ -8,3 +8,5 @@ statsmodels
 streamlit
 pydeck
 anthropic
+fastapi
+uvicorn[standard]

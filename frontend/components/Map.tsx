@@ -1,14 +1,13 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import ReactMap, {
   Layer, Source, NavigationControl, ScaleControl,
   type MapRef, type MapLayerMouseEvent,
 } from 'react-map-gl';
 import type { FeatureCollection } from 'geojson';
-import LayerToggle from './LayerToggle';
-import Legend from './Legend';
-import { type LayerVisibility, type RiskTier, type SelectedIntersection } from '@/lib/types';
+import { type RiskTier, type SelectedIntersection } from '@/lib/types';
+import { fetchBikeFacilities } from '@/lib/api';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 interface Props {
@@ -35,23 +34,25 @@ const TIER_COLOR: any = [
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const CIRCLE_RADIUS: any = [
   'interpolate', ['linear'], ['get', 'risk_score'],
-  0, 6, 50, 10, 100, 18,
+  0, 5, 50, 9, 100, 15,
 ];
 
-export default function TrafficMap({ intersections, activeTiers, onTierToggle, onIntersectionClick }: Props) {
+export default function TrafficMap({ intersections, activeTiers, onTierToggle: _onTierToggle, onIntersectionClick }: Props) {
   const mapRef = useRef<MapRef>(null);
   const [cursor, setCursor] = useState<'grab' | 'pointer'>('grab');
-  const [layers, setLayers] = useState<LayerVisibility>({ circles: true, bikeFacility: true });
+  const [bikeLines, setBikeLines] = useState<FeatureCollection | null>(null);
 
-  const toggleLayer = useCallback((key: keyof LayerVisibility) => {
-    setLayers(prev => ({ ...prev, [key]: !prev[key] }));
+  // Load bike facility lines once
+  useEffect(() => {
+    fetchBikeFacilities()
+      .then(setBikeLines)
+      .catch(() => {}); // non-critical — map works without it
   }, []);
 
-  // Mapbox filter: only show intersections whose tier is in activeTiers
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tierFilter: any = activeTiers.length < 5
     ? ['in', ['get', 'risk_tier'], ['literal', activeTiers]]
-    : undefined;
+    : ['has', 'risk_tier'];
 
   const handleClick = useCallback((e: MapLayerMouseEvent) => {
     const feature = e.features?.[0];
@@ -61,25 +62,25 @@ export default function TrafficMap({ intersections, activeTiers, onTierToggle, o
     }
     const p = feature.properties ?? {};
     onIntersectionClick({
-      intersectionId: Number(p.intersection_id ?? 0),
-      name:           String(p.name            ?? 'Unknown'),
-      riskScore:      Number(p.risk_score       ?? 0),
-      riskTier:       String(p.risk_tier        ?? 'very_low') as RiskTier,
-      predictedCrashes: Number(p.predicted_crashes ?? 0),
-      ebPredicted:    Number(p.eb_predicted     ?? 0),
-      observedCrashes: Number(p.observed_crashes ?? 0),
-      yearsObserved:  Number(p.years_observed   ?? 6),
-      injuryTotal:    Number(p.injury_total      ?? 0),
-      ksiTotal:       Number(p.ksi_total         ?? 0),
-      fatalTotal:     Number(p.fatal_total       ?? 0),
-      pedTotal:       Number(p.ped_total         ?? 0),
-      bikeTotal:      Number(p.bike_total        ?? 0),
-      isSignalized:   Boolean(p.is_signalized),
-      numLegs:        Number(p.num_legs          ?? 4),
-      maxSpeedLimit:  Number(p.max_speed_limit   ?? 0),
-      bikeFacility:   String(p.bike_facility     ?? 'None'),
-      arterialClass:  String(p.arterial_class    ?? ''),
-      coordinates:    { lat: e.lngLat.lat, lng: e.lngLat.lng },
+      intersectionId:   Number(p.intersection_id    ?? 0),
+      name:             String(p.name               ?? 'Unknown'),
+      riskScore:        Number(p.risk_score          ?? 0),
+      riskTier:         String(p.risk_tier           ?? 'very_low') as RiskTier,
+      predictedCrashes: Number(p.predicted_crashes   ?? 0),
+      ebPredicted:      Number(p.eb_predicted        ?? 0),
+      observedCrashes:  Number(p.observed_crashes    ?? 0),
+      yearsObserved:    Number(p.years_observed      ?? 6),
+      injuryTotal:      Number(p.injury_total        ?? 0),
+      ksiTotal:         Number(p.ksi_total           ?? 0),
+      fatalTotal:       Number(p.fatal_total         ?? 0),
+      pedTotal:         Number(p.ped_total           ?? 0),
+      bikeTotal:        Number(p.bike_total          ?? 0),
+      isSignalized:     Boolean(p.is_signalized),
+      numLegs:          Number(p.num_legs            ?? 4),
+      maxSpeedLimit:    Number(p.max_speed_limit     ?? 0),
+      bikeFacility:     String(p.bike_facility       ?? 'None'),
+      arterialClass:    String(p.arterial_class      ?? ''),
+      coordinates:      { lat: e.lngLat.lat, lng: e.lngLat.lng },
     });
   }, [onIntersectionClick]);
 
@@ -113,53 +114,91 @@ export default function TrafficMap({ intersections, activeTiers, onTierToggle, o
       <NavigationControl position="top-right" />
       <ScaleControl position="bottom-right" unit="imperial" />
 
-      {intersections && (
-        <Source id="intersections" type="geojson" data={intersections}>
-          {/* Bike facility outer ring */}
+      {/* ── Bike facility lines (real lane geometry) ─────────────────────── */}
+      {bikeLines && (
+        <Source id="bike-lines" type="geojson" data={bikeLines}>
+          {/* Glow / casing */}
           <Layer
-            id="bike-facility-ring"
-            type="circle"
-            filter={['all',
-              ['!=', ['get', 'bike_facility'], 'None'],
-              ...(tierFilter ? [tierFilter] : []),
-            ] as any}
-            layout={{ visibility: layers.bikeFacility ? 'visible' : 'none' }}
+            id="bike-lines-glow"
+            type="line"
             paint={{
-              'circle-radius': ['+', CIRCLE_RADIUS as unknown as number, 5],
-              'circle-color': 'transparent',
-              'circle-stroke-width': 2,
-              'circle-stroke-color': '#06b6d4',
-              'circle-stroke-opacity': 0.9,
+              'line-color': '#06b6d4',
+              'line-width': 4,
+              'line-opacity': 0.15,
+              'line-blur': 3,
             }}
           />
-          {/* Main collision circles */}
+          {/* Main line */}
           <Layer
-            id="intersection-circles"
-            type="circle"
-            filter={tierFilter}
-            layout={{ visibility: layers.circles ? 'visible' : 'none' }}
+            id="bike-lines-main"
+            type="line"
             paint={{
-              'circle-color': TIER_COLOR,
-              'circle-radius': CIRCLE_RADIUS,
-              'circle-opacity': 0.88,
-              'circle-stroke-width': 1.5,
-              'circle-stroke-color': 'rgba(0,0,0,0.35)',
+              'line-color': '#22d3ee',
+              'line-width': 1.5,
+              'line-opacity': 0.75,
+              'line-dasharray': [2, 1.5],
             }}
           />
         </Source>
       )}
 
-      <div className="absolute top-4 left-4">
-        <LayerToggle
-          layers={layers}
-          onLayerToggle={toggleLayer}
-          activeTiers={activeTiers}
-          onTierToggle={onTierToggle}
-        />
-      </div>
-      <div className="absolute bottom-10 left-4">
-        <Legend />
-      </div>
+      {/* ── Intersection risk circles ─────────────────────────────────────── */}
+      {intersections && (
+        <Source id="intersections" type="geojson" data={intersections}>
+          {/* Outer glow — simulates radial gradient */}
+          <Layer
+            id="intersection-glow"
+            type="circle"
+            filter={tierFilter}
+            paint={{
+              'circle-color': TIER_COLOR,
+              'circle-radius': ['*', CIRCLE_RADIUS, 2.2] as any,
+              'circle-opacity': 0.12,
+              'circle-blur': 1,
+              'circle-stroke-width': 0,
+            }}
+          />
+          {/* Mid glow */}
+          <Layer
+            id="intersection-mid"
+            type="circle"
+            filter={tierFilter}
+            paint={{
+              'circle-color': TIER_COLOR,
+              'circle-radius': ['*', CIRCLE_RADIUS, 1.45] as any,
+              'circle-opacity': 0.22,
+              'circle-blur': 0.6,
+              'circle-stroke-width': 0,
+            }}
+          />
+          {/* Core circle */}
+          <Layer
+            id="intersection-circles"
+            type="circle"
+            filter={tierFilter}
+            paint={{
+              'circle-color': TIER_COLOR,
+              'circle-radius': CIRCLE_RADIUS,
+              'circle-opacity': 0.92,
+              'circle-blur': 0.08,
+              'circle-stroke-width': 0,
+            }}
+          />
+          {/* Bright centre highlight */}
+          <Layer
+            id="intersection-highlight"
+            type="circle"
+            filter={tierFilter}
+            paint={{
+              'circle-color': '#ffffff',
+              'circle-radius': ['*', CIRCLE_RADIUS, 0.32] as any,
+              'circle-opacity': 0.18,
+              'circle-blur': 0.4,
+              'circle-stroke-width': 0,
+            }}
+          />
+        </Source>
+      )}
     </ReactMap>
   );
 }

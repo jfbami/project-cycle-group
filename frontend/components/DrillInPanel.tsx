@@ -65,14 +65,16 @@ export default function DrillInPanel({ intersection, onClose }: Props) {
   const i = intersection;
 
   return (
-    <aside className={[
-      'absolute top-0 right-0 h-full w-80 bg-gray-900/95 backdrop-blur-sm',
-      'border-l border-gray-700 flex flex-col z-10',
-      'transition-transform duration-300 ease-in-out',
-      i ? 'translate-x-0' : 'translate-x-full',
-    ].join(' ')} aria-hidden={!i}>
+    <aside
+      className={[
+        'absolute top-0 right-0 h-full w-80 flex flex-col z-10',
+        'transition-transform duration-300 ease-in-out',
+        i ? 'translate-x-0' : 'translate-x-full',
+      ].join(' ')}
+      style={{ backgroundColor: '#0d0e14', borderLeft: '1px solid #1e1f2a' }}
+      aria-hidden={!i}>
 
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700 flex-shrink-0">
+      <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid #1e1f2a' }}>
         <div className="min-w-0 pr-2">
           <p className="text-[10px] text-gray-500 uppercase tracking-wider">
             ID {i?.intersectionId}

@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import type { FeatureCollection } from 'geojson';
 import DrillInPanel from '@/components/DrillInPanel';
-import VisionZeroScorecard from '@/components/VisionZeroScorecard';
+import LeftPanel from '@/components/LeftPanel';
 import { fetchIntersections } from '@/lib/api';
 import { ALL_TIERS, type RiskTier, type SelectedIntersection, type ScorecardStats } from '@/lib/types';
 
@@ -65,7 +65,7 @@ export default function HomePage() {
           <p className="text-gray-400 text-sm mb-4">{error}</p>
           <p className="text-gray-500 text-xs mb-2">Start the API server from your Python project:</p>
           <pre className="bg-gray-950 text-cyan-300 text-xs rounded-lg p-3 overflow-x-auto">
-            uvicorn api_server:app --port 8000 --reload
+            python -m uvicorn api_server:app --port 8000 --reload
           </pre>
           <p className="text-gray-600 text-xs mt-4">
             Then set <code className="text-gray-400">NEXT_PUBLIC_API_URL=http://localhost:8000</code> in <code className="text-gray-400">.env.local</code> and refresh.
@@ -76,22 +76,23 @@ export default function HomePage() {
   }
 
   return (
-    <main className="relative w-full h-screen">
-      {scorecard && (
-        <VisionZeroScorecard
-          stats={scorecard}
-          totalIntersections={intersections?.features.length ?? 0}
-        />
-      )}
-
-      <TrafficMap
-        intersections={intersections}
+    <main className="flex w-full h-screen overflow-hidden">
+      <LeftPanel
+        stats={scorecard}
+        totalIntersections={intersections?.features.length ?? 0}
         activeTiers={activeTiers}
         onTierToggle={toggleTier}
-        onIntersectionClick={setSelected}
       />
 
-      <DrillInPanel intersection={selected} onClose={() => setSelected(null)} />
+      <div className="relative flex-1">
+        <TrafficMap
+          intersections={intersections}
+          activeTiers={activeTiers}
+          onTierToggle={toggleTier}
+          onIntersectionClick={setSelected}
+        />
+        <DrillInPanel intersection={selected} onClose={() => setSelected(null)} />
+      </div>
     </main>
   );
 }
