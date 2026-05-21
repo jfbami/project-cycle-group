@@ -1,0 +1,14 @@
+# dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# environment variables — NEVER commit the real one
+.env.local
+.env*.local
+
+# OS
+.DS_Store
+Thumbs.db
